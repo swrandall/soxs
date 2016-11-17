@@ -14,7 +14,6 @@ import scipy.integrate as integrate
 import numpy as np
 import scipy.optimize as optimize
 import random
-from astropy.utils.console import ProgressBar
 from soxs import write_photon_list, instrument_simulator
 from soxs.constants import keV_per_erg, erg_per_keV
 from soxs.spectra import get_wabs_absorb
@@ -26,7 +25,6 @@ class Bgsrc:
         self.flux = flux
         self.z = z
         self.ind = ind
-        self.scale_factor = 1.0/(1.+z)
 
 # dN/dS, takes S in 1e-14 erg/cm^2/s
 # returns 10^14 deg^-2  (erg/cm^2/s)^-1
@@ -143,7 +141,7 @@ def main():
     ra_cen = 96.6 # degress, RA of field center
     dec_cen = -53.73 #degrees, Dec of field center
     nH = 0.05 # Galactic absorption, 1e22 cm^-2
-
+    
     fb_emin = 0.5  # keV, low energy bound for full band flux
     fb_emax = 8.0  # keV, high energy bound for full band flux
     spec_emin = 0.1 # keV, minimum energy of mock spectrum
@@ -154,6 +152,9 @@ def main():
     gal_ind = 1.2 # galaxy photon index
     gal_z = 0.8 # galaxy redshift
     star_ind = 1.0 # star photon index
+
+    int_absorb = True
+    nH_int = 0.05
 
     dither_size = 16.0 # dither circle radius or box width in arcsec
     dither_shape = 'square'
@@ -298,22 +299,27 @@ def main():
         # Using the energy flux, determine the photon flux by simple scaling
         ref_ph_flux = source.flux*fluxscale[source.src_type]*keV_per_erg
         # Now determine the number of photons we will generate
-        n_ph = np.modf(ref_ph_flux*t_exp*1000.0*eff_area)
-        n_ph = np.int64(n_ph[1]) + np.int64(n_ph[0] >= u_src[i])
+        nph = np.modf(ref_ph_flux*t_exp*1000.0*eff_area)
+        nph = np.int64(nph[1]) + np.int64(nph[0] >= u_src[i])
 
-        if n_ph > 0:
+        if nph > 0:
             # Generate the energies in the source frame
-            u = prng.uniform(size=n_ph)
+            u = prng.uniform(size=nph)
             if source.ind == 1.0:
                 energies = spec_emin*(eratio**u)
             else:
                 energies = fac1[source.src_type] + u*fac2[source.src_type]
                 energies **= invoma[source.src_type]
-            # NOTE: Here is where we could put in intrinsic absorption if we wanted.
+            # Here is where we apply intrinsic absorption for galaxies and agn.
             # Local galactic absorption is done at the end.
+            if int_absorb and source.src_type in ["agn", "gal"]:
+                absorb = get_wabs_absorb(energies*(1.0+source.z), nH_int)
+                randvec = prng.uniform(size=energies.size)
+                energies = energies[randvec < absorb]
+            new_nph = energies.size
             # Assign positions for this source
-            ra = prng.random(size=n_ph)*fov/(60.0*dec_scal) + ra_min
-            dec = prng.random(size=n_ph)*fov/60.0 + dec_min
+            ra = prng.random(size=new_nph)*fov/(60.0*dec_scal) + ra_min
+            dec = prng.random(size=new_nph)*fov/60.0 + dec_min
 
             all_energies.append(energies)
             all_ra.append(ra)
@@ -330,7 +336,7 @@ def main():
     mylog.info("Generated %d photons from point sources." % all_nph)
 
     # Remove some of the photons due to Galactic foreground absorption.
-    # We throw a lot of stuff away, but this is more general and still
+    # We will throw a lot of stuff away, but this is more general and still
     # faster. 
     absorb = get_wabs_absorb(all_energies, nH)
     randvec = prng.uniform(size=all_energies.size)
