@@ -3,10 +3,6 @@ from soxs.spectra import wabs_cross_section
 import astropy.io.fits as pyfits
 import numpy as np
 
-def get_wabs_absorb(e, nH):
-    sigma = wabs_cross_section(e)
-    return np.exp(-nH*1.0e22*sigma)
-
 def write_spectrum(evtfile, specfile, clobber=False):
     r"""
     Bin event energies into a spectrum and write it to a FITS binary table. Can bin
