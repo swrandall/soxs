@@ -106,8 +106,8 @@ def int_dNdS(S_lo, S_hi, src_type, band):
             int_dnds = K*S_ref**beta1/(1-beta1)*(S_hi**(1-beta1) - S_lo**(1-beta1))
         else:
             int_dnds = K*S_ref**beta1/(1-beta1)*(f_break**(1-beta1) - S_lo**(1-beta1))
-            int_dnds = int_dnds + K*(f_break/S_ref)**(beta2-beta1)*S_ref**beta2/(1-beta2)\
-                *(S_hi**(1-beta2) - f_break**(1-beta2))
+            int_dnds += K*(f_break/S_ref)**(beta2-beta1)*S_ref**beta2/(1-beta2) \
+                * (S_hi**(1-beta2) - f_break**(1-beta2))
     else:
         int_dnds = K*S_ref**beta1/(1-beta1)*(S_hi**(1-beta1) - S_lo**(1-beta1))
 
@@ -119,11 +119,11 @@ def dNdS_draw(S_draw, rand, norm, src_type, band):
 
 def plaw_cdf(n_ph, emin, emax, alpha, prng=np.random):
     u = prng.uniform(size=n_ph)
-    oma = 1.0-alpha
-    invoma = 1.0/oma
     if alpha == 1.0:
         e = emin*(emax/emin)**u
     else:
+        oma = 1.0-alpha
+        invoma = 1.0/oma
         e = emin**oma + u*(emax**oma-emin**oma)
         e **= invoma
     return e
@@ -185,7 +185,7 @@ def main():
     S_min = 0.1*eph_mean_erg/(t_exp*1000*eff_area)
     S_min = S_min/1e-14
     # S_min = 9.8e-7
-    mylog.info("The flux limit is %g." % S_min*1e-14)
+    mylog.info("The flux limit is %g." % (S_min*1e-14))
     fov_area = fov**2
 
     if test:
@@ -301,11 +301,9 @@ def main():
 
             if n_ph > 0:
                 # Generate the energies in the source frame
-                energies = plaw_cdf(n_ph, source.ind, spec_emin, spec_emax, prng=prng)
+                energies = plaw_cdf(n_ph, spec_emin, spec_emax, source.ind, prng=prng)
                 # NOTE: Here is where we could put in intrinsic absorption if we wanted.
                 # Local galactic absorption is done at the end.
-                # Cosmologically redshift the energies
-                #energies *= source.scale_factor
                 # Assign positions for this source
                 ra = prng.random(size=n_ph)*fov/(60.0*dec_scal) + ra_min
                 dec = prng.random(size=n_ph)*fov/60.0 + dec_min
@@ -337,7 +335,7 @@ def main():
 
     mylog.info("%d photons remain after foreground galactic absorption." % all_nph)
 
-    all_flux = np.sum(all_energies)*keV_per_erg/(t_exp*1000*eff_area)
+    all_flux = np.sum(all_energies)*erg_per_keV/(t_exp*1000*eff_area)
 
     write_photon_list(evt_prefix, evt_prefix, all_flux, all_ra, all_dec, all_energies, clobber=True)
     simput_file = evt_prefix + "_simput.fits"
