@@ -290,8 +290,7 @@ class Spectrum(object):
         nH : float
             The hydrogen column in units of 10**22 atoms/cm**2
         """
-        sigma = wabs_cross_section(self.emid.value)
-        self.flux *= np.exp(-nH*1.0e22*sigma)
+        self.flux *= get_wabs_absorb(self.emid.value, nH)
         self._compute_total_flux()
 
     def generate_energies(self, t_exp, area, prng=None):
@@ -509,6 +508,10 @@ def wabs_cross_section(E):
     idxs = np.minimum(np.searchsorted(emax, E)-1, 13)
     sigma = (c0[idxs]+c1[idxs]*E+c2[idxs]*E*E)*1.0e-24/E**3
     return sigma
+
+def get_wabs_absorb(e, nH):
+    sigma = wabs_cross_section(e)
+    return np.exp(-nH*1.0e22*sigma)
 
 class ConvolvedSpectrum(Spectrum):
     _units = "photon/(s*keV)"

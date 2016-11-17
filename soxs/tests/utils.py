@@ -5,10 +5,6 @@ import numpy as np
 import os
 from copy import copy
 
-def get_wabs_absorb(e, nH):
-    sigma = wabs_cross_section(e)
-    return np.exp(-nH*1.0e22*sigma)
-
 def write_spectrum(evtfile, specfile, clobber=False):
     r"""
     Bin event energies into a spectrum and write it to a FITS binary table. Can bin
