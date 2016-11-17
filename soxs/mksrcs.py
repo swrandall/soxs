@@ -10,15 +10,12 @@
 
 import sys
 import argparse
-import math
 import scipy.integrate as integrate
 import numpy as np
 import scipy.optimize as optimize
 import random
-from astropy.io import fits
-from astropy.wcs import WCS
-from soxs import Spectrum, write_photon_list, instrument_simulator
-from soxs.instrument import instrument_registry
+from astropy.utils.console import ProgressBar
+from soxs import write_photon_list, instrument_simulator
 from soxs.constants import keV_per_erg, erg_per_keV
 from soxs.spectra import get_wabs_absorb
 from soxs.utils import mylog
@@ -118,7 +115,7 @@ def int_dNdS(S_lo, S_hi, src_type, band):
 
 def dNdS_draw(S_draw, rand, norm, src_type, band):
     return ((int_dNdS(S_draw, np.inf, src_type, band))/norm - rand)
-#    return ((integrate.quad(dNdS, S_draw, np.inf, args=(type,band))[0])/norm - rand)
+    # return ((integrate.quad(dNdS, S_draw, np.inf, args=(type,band))[0])/norm - rand)
 
 def plaw_cdf(n_ph, emin, emax, alpha, prng=np.random):
     u = prng.uniform(size=n_ph)
@@ -131,15 +128,15 @@ def plaw_cdf(n_ph, emin, emax, alpha, prng=np.random):
         e **= invoma
     return e
 
-def get_flux_scale(ind, emin, emax):
+def get_flux_scale(ind, fb_emin, fb_emax, spec_emin, spec_emax):
     if ind == 1.0:
-        f_g = np.log(emax/emin)
+        f_g = np.log(spec_emax/spec_emin)
     else:
-        f_g = (emax**(1.0-ind)-emin**(1.0-ind))/(1.0-ind)
+        f_g = (spec_emax**(1.0-ind)-spec_emin**(1.0-ind))/(1.0-ind)
     if ind == 2.0:
-        f_E = np.log(emax/emin)
+        f_E = np.log(fb_emax/fb_emin)
     else:
-        f_E = (emax**(2.0-ind)-emin**(2.0-ind))/(2.0-ind)
+        f_E = (fb_emax**(2.0-ind)-fb_emin**(2.0-ind))/(2.0-ind)
     fscale = f_g/f_E
     return fscale
 
@@ -149,10 +146,7 @@ def main():
     eph_mean = 1   # mean photon energy, keV
     fov = 20    # edge of FOV, arcmin
     sources = []
-    inimage = 'foo.fits'
-    outimage = 'moo.fits'
     draw_srcs = True
-    mode = 'events' # 'events' or 'image', add idealized sources to input image or generate events file.  Set to something else to simply print out the number of expected BG sources of different types
     src_types = ['agn', 'gal', 'star']
     # parameters for making event file
     evt_prefix = "10ks_fast" # event file prefix
@@ -163,7 +157,6 @@ def main():
     fb_emax = 8.0  # keV, high energy bound for full band flux
     spec_emin = 0.1 # keV, minimum energy of mock spectrum
     spec_emax = 10.0 # keV, max energy of mock spectrum
-    spec_nbins = 5000 # number of bins between spec_emin and spec_emax
     agn_ind = 1.2 # AGN photon index
     agn_z = 2.0 # AGN redshift
     gal_ind = 1.2 # galaxy photon index
@@ -176,9 +169,10 @@ def main():
 
     redshifts = {"agn": agn_z, "gal": gal_z, "star": 0.0}
     indices = {"agn": agn_ind, "gal": gal_ind, "star": star_ind}
-    fluxscal = {}
+    fluxscale = {}
     for src_type in src_types:
-        fluxscal[src_type] = get_flux_scale(indices[src_type], fb_emin, fb_emax)
+        fluxscale[src_type] = get_flux_scale(indices[src_type], fb_emin, fb_emax,
+                                             spec_emin, spec_emax)
 
     eph_mean_erg = eph_mean*erg_per_keV
 
@@ -186,29 +180,9 @@ def main():
     # during the exposure
     S_min = 0.1*eph_mean_erg/(t_exp*1000*eff_area)
     S_min = S_min/1e-14
-#    S_min = 9.8e-7
-    print("Flux limit is",S_min*1e-14)
-
+    # S_min = 9.8e-7
+    mylog.info("The flux limit is %g." % S_min*1e-14)
     fov_area = fov**2
-
-    if mode == 'image':
-        # Read input image to get size of FOV
-        print("Reading image...")
-        try:
-            hdus = fits.open(inimage)
-        except:
-            sys.exit('There was an error reading the input image')
-
-        xlen = hdus[0].header['naxis1']
-        ylen = hdus[0].header['naxis2']
-#        wcs = WCS(hdus[0].header)
-#        pixscal = astropy.wcs.utils.proj_plane_pixel_scales(wcs)
-        pixscal = abs(hdus[0].header['cdelt1'])
-        if hdus[0].header['cunit1'] == 'degree':
-            print("FOV is",xlen*60*pixscal,"x",ylen*60*pixscal,"arcmin.")
-            fov_area = xlen*ylen*(60*pixscal)**2
-        else:
-            sys.exit('Image CUNIT1 type not recognized')
 
     if test:
         n_srcs = integrate.quad(dNdS, S_min, np.inf, args=('agn','fb'))[0]
@@ -230,20 +204,22 @@ def main():
     for src_type in src_types:
         # dNdS returns 10^14 deg^-2 (erg/cm^2/s)^-1, but we get a factor of
         # 10^-14 from dS in integral, so they cancel
-#        n_srcs = integrate.quad(dNdS, S_min, np.inf, args=(type,'fb'))[0]
+        # n_srcs = integrate.quad(dNdS, S_min, np.inf, args=(type,'fb'))[0]
         n_srcs = int_dNdS(S_min, np.inf, src_type, 'fb')
         # scale to the FOV
         n_srcs_fov = n_srcs*fov_area/60**2
-        print("Expect", n_srcs_fov, "source of type",src_type,"in the field.")
-
+        mylog.info("Expect %d sources of type \"%s\" in the field." % (n_srcs_fov, src_type))
         # draw a random distribution of sources
         if draw_srcs:
-            print("Drawing sources from distribution...")
+            mylog.info("Drawing sources from distribution \"%s\"." % src_type)
             for i in range(0,int(round(n_srcs_fov,0))):
                 rand = random.random()
                 S = optimize.brentq(dNdS_draw, S_min, 1000, args=(rand, n_srcs, src_type, 'fb'))
                 thissrc = Bgsrc(src_type, S*1e-14, redshifts[src_type], indices[src_type])
                 sources.append(thissrc)
+
+    num_sources = len(sources)
+
     if test:
         ngt17 = 0
         ngt16 = 0
@@ -302,33 +278,22 @@ def main():
 
         sys.exit('done testing')
 
-    if mode == 'image':
-        print("Placing sources in image...")
-        for source in sources:
-            xrand = math.floor(xlen*random.random())
-            yrand = math.floor(ylen*random.random())
-            hdus[0].data[yrand, xrand] = source.flux*eff_area/eph_mean_erg
-        hdus.writeto(outimage, clobber='y')
+    mylog.info("Generating spectra from %d sources." % len(sources))
+    dec_scal = np.fabs(np.cos(dec_cen*np.pi/180))
+    ra_min = ra_cen - fov/(2*60*dec_scal)
+    dec_min = dec_cen - fov/(2*60)
+    all_energies = []
+    all_ra = []
+    all_dec = []
 
-    if mode == 'events':
-        # assign spectral models
-        mylog.info("Generating spectra from %d sources." % len(sources))
-        dec_scal = np.fabs(np.cos(dec_cen*np.pi/180))
-        ra_min = ra_cen - fov/(2*60*dec_scal)
-        dec_min = dec_cen - fov/(2*60)
-        all_energies = []
-        all_ra = []
-        all_dec = []
-
+    with ProgressBar(num_sources) as pbar:
         for source in sources:
 
             # Using the energy flux, determine the photon flux by simple scaling
-            ref_ph_flux = source.flux*fluxscal[source.src_type]*keV_per_erg
+            ref_ph_flux = source.flux*fluxscale[source.src_type]*keV_per_erg
             # Now determine the number of photons we will generate
             n_ph = np.modf(ref_ph_flux*t_exp*1000.0*eff_area)
             n_ph = np.int64(n_ph[1]) + np.int64(n_ph[0] >= prng.uniform())
-
-            print(source.flux, ref_ph_flux, n_ph)
 
             if n_ph > 0:
                 # Generate the energies in the source frame
@@ -338,43 +303,45 @@ def main():
                 # Cosmologically redshift the energies
                 #energies *= source.scale_factor
                 # Assign positions for this source
-                ra = np.array([prng.random()*fov/(60*dec_scal) + ra_min]*energies.size)
-                dec = np.array([prng.random()*fov/60 + dec_min]*energies.size)
+                ra = prng.random(size=n_ph)*fov/(60.0*dec_scal) + ra_min
+                dec = prng.random(size=n_ph)*fov/60.0 + dec_min
 
                 all_energies.append(energies)
                 all_ra.append(ra)
                 all_dec.append(dec)
 
-        all_energies = np.concatenate(all_energies)
-        all_ra = np.concatenate(all_ra)
-        all_dec = np.concatenate(all_dec)
+            pbar.update()
 
-        all_nph = all_energies.size
+    all_energies = np.concatenate(all_energies)
+    all_ra = np.concatenate(all_ra)
+    all_dec = np.concatenate(all_dec)
 
-        mylog.info("Generated %d photons from point sources." % all_nph)
+    all_nph = all_energies.size
 
-        # Remove some of the photons due to Galactic foreground absorption.
-        # We throw a lot of stuff away, but this is more general and still
-        # faster. 
-        absorb = get_wabs_absorb(all_energies, nH)
-        randvec = prng.uniform(size=all_energies.size)
-        all_energies = all_energies[randvec < absorb]
-        all_ra = all_ra[randvec < absorb]
-        all_dec = all_dec[randvec < absorb]
+    mylog.info("Generated %d photons from point sources." % all_nph)
 
-        all_nph = all_energies.size
+    # Remove some of the photons due to Galactic foreground absorption.
+    # We throw a lot of stuff away, but this is more general and still
+    # faster. 
+    absorb = get_wabs_absorb(all_energies, nH)
+    randvec = prng.uniform(size=all_energies.size)
+    all_energies = all_energies[randvec < absorb]
+    all_ra = all_ra[randvec < absorb]
+    all_dec = all_dec[randvec < absorb]
 
-        mylog.info("%d photons remain after foreground galactic absorption." % all_nph)
+    all_nph = all_energies.size
 
-        all_flux = np.sum(all_energies)*keV_per_erg/(t_exp*1000*eff_area)
+    mylog.info("%d photons remain after foreground galactic absorption." % all_nph)
 
-        write_photon_list(evt_prefix, evt_prefix, all_flux, all_ra, all_dec, all_energies, clobber=True)
-        simput_file = evt_prefix + "_simput.fits"
-        evt_file = evt_prefix + "_evt.fits"
-        mylog.info("Running instrument simulator...")
-        instrument_simulator(simput_file, evt_file,  t_exp*1000, 'hdxi', [ra_cen,dec_cen],
-                             dither_size=dither_size, dither_shape=dither_shape, 
-                             astro_bkgnd=None, instr_bkgnd_scale=0, clobber=True)
+    all_flux = np.sum(all_energies)*keV_per_erg/(t_exp*1000*eff_area)
+
+    write_photon_list(evt_prefix, evt_prefix, all_flux, all_ra, all_dec, all_energies, clobber=True)
+    simput_file = evt_prefix + "_simput.fits"
+    evt_file = evt_prefix + "_evt.fits"
+    mylog.info("Running instrument simulator...")
+    instrument_simulator(simput_file, evt_file,  t_exp*1000, 'hdxi', [ra_cen,dec_cen],
+                         dither_size=dither_size, dither_shape=dither_shape, 
+                         astro_bkgnd=None, instr_bkgnd_scale=0, clobber=True)
 
 if __name__ == "__main__":
     main()
