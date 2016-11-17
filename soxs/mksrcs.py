@@ -114,7 +114,7 @@ def int_dNdS(S_lo, S_hi, src_type, band):
     return int_dnds
 
 def dNdS_draw(S_draw, rand, norm, src_type, band):
-    return ((int_dNdS(S_draw, np.inf, src_type, band))/norm - rand)
+    return int_dNdS(S_draw, np.inf, src_type, band)/norm - rand
     # return ((integrate.quad(dNdS, S_draw, np.inf, args=(type,band))[0])/norm - rand)
 
 def plaw_cdf(n_ph, emin, emax, alpha, prng=np.random):
@@ -148,20 +148,24 @@ def main():
     sources = []
     draw_srcs = True
     src_types = ['agn', 'gal', 'star']
+
     # parameters for making event file
     evt_prefix = "10ks_fast" # event file prefix
     ra_cen = 96.6 # degress, RA of field center
     dec_cen = -53.73 #degrees, Dec of field center
     nH = 0.05 # Galactic absorption, 1e22 cm^-2
+
     fb_emin = 0.5  # keV, low energy bound for full band flux
     fb_emax = 8.0  # keV, high energy bound for full band flux
     spec_emin = 0.1 # keV, minimum energy of mock spectrum
     spec_emax = 10.0 # keV, max energy of mock spectrum
+
     agn_ind = 1.2 # AGN photon index
     agn_z = 2.0 # AGN redshift
     gal_ind = 1.2 # galaxy photon index
     gal_z = 0.8 # galaxy redshift
     star_ind = 1.0 # star photon index
+
     dither_size = 16.0 # dither circle radius or box width in arcsec
     dither_shape = 'square'
     test = False
