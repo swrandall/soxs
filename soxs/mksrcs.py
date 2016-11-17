@@ -117,17 +117,6 @@ def dNdS_draw(S_draw, rand, norm, src_type, band):
     return int_dNdS(S_draw, np.inf, src_type, band)/norm - rand
     # return ((integrate.quad(dNdS, S_draw, np.inf, args=(type,band))[0])/norm - rand)
 
-def plaw_cdf(n_ph, emin, emax, alpha, prng=np.random):
-    u = prng.uniform(size=n_ph)
-    if alpha == 1.0:
-        e = emin*(emax/emin)**u
-    else:
-        oma = 1.0-alpha
-        invoma = 1.0/oma
-        e = emin**oma + u*(emax**oma-emin**oma)
-        e **= invoma
-    return e
-
 def get_flux_scale(ind, fb_emin, fb_emax, spec_emin, spec_emax):
     if ind == 1.0:
         f_g = np.log(spec_emax/spec_emin)
@@ -141,7 +130,7 @@ def get_flux_scale(ind, fb_emin, fb_emax, spec_emin, spec_emax):
     return fscale
 
 def main():
-    t_exp = 10 # exposure time, ksec
+    t_exp = 10. # exposure time, ksec
     eff_area = 40000   # effective area, cm^2
     eph_mean = 1   # mean photon energy, keV
     fov = 20    # edge of FOV, arcmin
@@ -290,29 +279,47 @@ def main():
     all_ra = []
     all_dec = []
 
-    with ProgressBar(num_sources) as pbar:
-        for source in sources:
+    # This loop is for optimization
+    eratio = spec_emax/spec_emin
+    oma = {}
+    invoma = {}
+    fac1 = {}
+    fac2 = {}
+    for k, ind in indices.items():
+        oma[k] = 1.0-ind
+        invoma[k] = 1.0/oma[k] if oma[k] != 0.0 else 1.0
+        fac1[k] = spec_emin**oma[k]
+        fac2[k] = spec_emax**oma[k]-spec_emin**oma[k]
 
-            # Using the energy flux, determine the photon flux by simple scaling
-            ref_ph_flux = source.flux*fluxscale[source.src_type]*keV_per_erg
-            # Now determine the number of photons we will generate
-            n_ph = np.modf(ref_ph_flux*t_exp*1000.0*eff_area)
-            n_ph = np.int64(n_ph[1]) + np.int64(n_ph[0] >= prng.uniform())
+    u_src = prng.uniform(size=num_sources)
 
-            if n_ph > 0:
-                # Generate the energies in the source frame
-                energies = plaw_cdf(n_ph, spec_emin, spec_emax, source.ind, prng=prng)
-                # NOTE: Here is where we could put in intrinsic absorption if we wanted.
-                # Local galactic absorption is done at the end.
-                # Assign positions for this source
-                ra = prng.random(size=n_ph)*fov/(60.0*dec_scal) + ra_min
-                dec = prng.random(size=n_ph)*fov/60.0 + dec_min
+    for i, source in enumerate(sources):
 
-                all_energies.append(energies)
-                all_ra.append(ra)
-                all_dec.append(dec)
+        # Using the energy flux, determine the photon flux by simple scaling
+        ref_ph_flux = source.flux*fluxscale[source.src_type]*keV_per_erg
+        # Now determine the number of photons we will generate
+        n_ph = np.modf(ref_ph_flux*t_exp*1000.0*eff_area)
+        n_ph = np.int64(n_ph[1]) + np.int64(n_ph[0] >= u_src[i])
 
-            pbar.update()
+        if n_ph > 0:
+            # Generate the energies in the source frame
+            u = prng.uniform(size=n_ph)
+            if source.ind == 1.0:
+                energies = spec_emin*(eratio**u)
+            else:
+                energies = fac1[source.src_type] + u*fac2[source.src_type]
+                energies **= invoma[source.src_type]
+            # NOTE: Here is where we could put in intrinsic absorption if we wanted.
+            # Local galactic absorption is done at the end.
+            # Assign positions for this source
+            ra = prng.random(size=n_ph)*fov/(60.0*dec_scal) + ra_min
+            dec = prng.random(size=n_ph)*fov/60.0 + dec_min
+
+            all_energies.append(energies)
+            all_ra.append(ra)
+            all_dec.append(dec)
+
+    mylog.info("Finished generating spectra.")
 
     all_energies = np.concatenate(all_energies)
     all_ra = np.concatenate(all_ra)
