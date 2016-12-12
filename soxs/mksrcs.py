@@ -137,7 +137,7 @@ def main():
     src_types = ['agn', 'gal', 'star']
 
     # parameters for making event file
-    evt_prefix = "10ks_fast" # event file prefix
+    evt_prefix = "10ks_fast2" # event file prefix
     ra_cen = 96.6 # degress, RA of field center
     dec_cen = -53.73 #degrees, Dec of field center
     nH = 0.05 # Galactic absorption, 1e22 cm^-2
@@ -151,9 +151,9 @@ def main():
     agn_z = 2.0 # AGN redshift
     gal_ind = 1.2 # galaxy photon index
     gal_z = 0.8 # galaxy redshift
-    star_ind = 1.0 # star photon index
+    star_ind = 1.2 # star photon index
 
-    int_absorb = True
+    int_absorb = False
     nH_int = 0.05
 
     dither_size = 16.0 # dither circle radius or box width in arcsec
@@ -318,8 +318,8 @@ def main():
                 energies = energies[randvec < absorb]
             new_nph = energies.size
             # Assign positions for this source
-            ra = prng.random(size=new_nph)*fov/(60.0*dec_scal) + ra_min
-            dec = prng.random(size=new_nph)*fov/60.0 + dec_min
+            ra = prng.random()*np.ones(new_nph)*fov/(60.0*dec_scal) + ra_min
+            dec = prng.random()*np.ones(new_nph)*fov/60.0 + dec_min
 
             all_energies.append(energies)
             all_ra.append(ra)
