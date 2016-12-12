@@ -5,13 +5,18 @@ import tempfile
 from soxs.spectra import Spectrum
 from soxs.spatial import PointSourceModel
 from soxs.simput import write_photon_list
+from soxs.instrument_registry import \
+    get_instrument_from_registry
 from soxs.instrument import instrument_simulator, \
-    get_instrument_from_registry, RedistributionMatrixFile, \
-    AuxiliaryResponseFile
-from soxs.tests.utils import write_spectrum, get_wabs_absorb
+    RedistributionMatrixFile, AuxiliaryResponseFile
+from soxs.tests.utils import write_spectrum, get_wabs_absorb, \
+    convert_rmf
 from sherpa.astro.ui import load_user_model, add_user_pars, \
     load_pha, ignore, fit, set_model, set_stat, set_method, \
     covar, get_covar_results, set_covar_opt
+from numpy.random import RandomState
+
+prng = RandomState(23)
 
 def mymodel(pars, x, xhi=None):
     dx = x[1]-x[0]
@@ -40,7 +45,7 @@ def plaw_fit(alpha_sim):
 
     spec = Spectrum.from_powerlaw(alpha_sim, redshift, norm_sim)
     spec.apply_foreground_absorption(nH_sim)
-    e = spec.generate_energies(exp_time, area)
+    e = spec.generate_energies(exp_time, area, prng=prng)
 
     pt_src = PointSourceModel(30.0, 45.0, e.size)
 
@@ -48,14 +53,15 @@ def plaw_fit(alpha_sim):
                       e, clobber=True)
 
     instrument_simulator("plaw_model_simput.fits", "plaw_model_evt.fits", exp_time, 
-                         inst_name, [30.0, 45.0], astro_bkgnd=None, instr_bkgnd_scale=0.0)
+                         inst_name, [30.0, 45.0], astro_bkgnd=False,
+                         instr_bkgnd=False, prng=prng)
 
     inst = get_instrument_from_registry(inst_name)
     arf = AuxiliaryResponseFile(inst["arf"])
     rmf = RedistributionMatrixFile(inst["rmf"])
     os.system("cp %s ." % arf.filename)
-    os.system("cp %s ." % rmf.filename)
-
+    convert_rmf(rmf.filename)
+    
     write_spectrum("plaw_model_evt.fits", "plaw_model_evt.pha", clobber=True)
 
     load_user_model(mymodel, "wplaw")
@@ -68,7 +74,7 @@ def plaw_fit(alpha_sim):
     load_pha("plaw_model_evt.pha")
     set_stat("cstat")
     set_method("simplex")
-    ignore(":0.5, 9.0:")
+    ignore(":0.5, 8.0:")
     set_model("wplaw")
     fit()
     set_covar_opt("sigma", 1.645)

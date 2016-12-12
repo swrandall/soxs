@@ -13,7 +13,7 @@ class BackgroundSpectrum(Spectrum):
         ebins = np.append(emid-0.5*de, emid[-1]+0.5*de)
         super(BackgroundSpectrum, self).__init__(ebins, flux)
 
-    def generate_energies(self, t_exp, area, fov, bkgnd_scale, prng=None):
+    def generate_energies(self, t_exp, area, fov, prng=None):
         """
         Generate photon energies from this background spectrum given an
         exposure time, effective area, and field of view.
@@ -28,21 +28,19 @@ class BackgroundSpectrum(Spectrum):
             large sample is drawn for the ARF.
         fov : float
             The width of the field of view on a side in arcminutes.
-        bkgnd_scale : float
-            A uniform scaling factor for the background. 
         prng : :class:`~numpy.random.RandomState` object or :mod:`~numpy.random`, optional
             A pseudo-random number generator. Typically will only be specified
             if you have a reason to generate the same set of random numbers, such as for a
             test. Default is the :mod:`numpy.random` module.
         """
-        A = area*fov*fov*bkgnd_scale
-        return super(BackgroundSpectrum, self).generate_energies(t_exp, A,
-                                                                 prng=prng)
+        A = area*fov*fov
+        ret = super(BackgroundSpectrum, self).generate_energies(t_exp, A, prng=prng)
+        return ret.value
 
 class ConvolvedBackgroundSpectrum(ConvolvedSpectrum):
     _units = "photon/(s*keV*arcmin**2)"
 
-    def generate_energies(self, t_exp, area, fov, bkgnd_scale, prng=None):
+    def generate_energies(self, t_exp, area, fov, prng=None):
         raise NotImplementedError()
 
 # ACIS-I particle background
@@ -57,9 +55,19 @@ mucal_particle_bkgnd = BackgroundSpectrum(mucal_bkgnd_file, "instrumental")
 hm_bkgnd_file = os.path.join(soxs_files_path, "hm_cxb_bkgnd.dat")
 hm_astro_bkgnd = BackgroundSpectrum(hm_bkgnd_file, "astrophysical")
 
+# Athena microcalorimeter background (http://adsabs.harvard.edu/abs/2014A%26A...569A..54L)
+xifu_bkgnd_file = os.path.join(soxs_files_path, "xifu_bkgnd.dat")
+athena_xifu_bkgnd = BackgroundSpectrum(xifu_bkgnd_file, "instrumental")
+
+# Athena imager background 
+wfi_bkgnd_file = os.path.join(soxs_files_path, "wfi_bkgnd.dat")
+athena_wfi_bkgnd = BackgroundSpectrum(wfi_bkgnd_file, "instrumental")
+
 background_registry = {"acisi": acisi_particle_bkgnd,
                        "mucal": mucal_particle_bkgnd, 
-                       "hm_cxb": hm_astro_bkgnd}
+                       "hm_cxb": hm_astro_bkgnd, 
+                       "athena_wfi": athena_wfi_bkgnd,
+                       "athena_xifu": athena_xifu_bkgnd}
 
 def add_background_to_registry(name, filename, bkgnd_type):
     """

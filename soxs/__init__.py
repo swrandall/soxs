@@ -1,4 +1,4 @@
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 from soxs.simput import \
     write_photon_list, \
@@ -10,19 +10,19 @@ from soxs.spectra import \
     ConvolvedSpectrum
 
 from soxs.instrument import \
-    add_instrument_to_registry, \
-    show_instrument_registry, \
-    write_instrument_json, \
     instrument_simulator, \
-    get_instrument_from_registry, \
     AuxiliaryResponseFile, \
     RedistributionMatrixFile
 
+from soxs.instrument_registry import \
+    add_instrument_to_registry, \
+    show_instrument_registry, \
+    write_instrument_json, \
+    get_instrument_from_registry
+
 from soxs.background import \
-    add_background_to_registry, \
     show_background_registry, \
-    BackgroundSpectrum, \
-    ConvolvedBackgroundSpectrum
+    add_background_to_registry
 
 from soxs.spatial import \
     PointSourceModel, \

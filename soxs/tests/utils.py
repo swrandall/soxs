@@ -2,6 +2,8 @@ from soxs.instrument import RedistributionMatrixFile
 from soxs.spectra import wabs_cross_section
 import astropy.io.fits as pyfits
 import numpy as np
+import os
+from copy import copy
 
 def write_spectrum(evtfile, specfile, clobber=False):
     r"""
@@ -69,3 +71,55 @@ def write_spectrum(evtfile, specfile, clobber=False):
     hdulist = pyfits.HDUList([pyfits.PrimaryHDU(), tbhdu])
 
     hdulist.writeto(specfile, clobber=clobber)
+
+def convert_rmf(rmffile):
+
+    f = pyfits.open(rmffile)
+
+    names = [ff.name for ff in f]
+    idx = -1
+    for i, name in enumerate(names):
+        if "MATRIX" in name:
+            idx = i
+            break
+
+    new_f = copy(f)
+
+    matrix = new_f[names[idx]]
+    fchan = matrix.data["F_CHAN"]
+    nchan = matrix.data["N_CHAN"]
+    m = matrix.data["MATRIX"]
+
+    fchan_new = pyfits.Column(name = 'F_CHAN', format='PJ()', 
+                              array=np.array([fc[fc > 0] for fc in fchan], dtype=np.object))
+    nchan_new = pyfits.Column(name = 'N_CHAN', format='PJ()', 
+                              array=np.array([nc[nc > 0] for nc in nchan], dtype=np.object))
+    m_new = pyfits.Column(name = 'MATRIX', format='PE()', 
+                          array=np.array([mm[mm > 0] for mm in m], dtype=np.object))
+
+    matrix_new = pyfits.BinTableHDU.from_columns([matrix.columns["ENERG_LO"], 
+                                                  matrix.columns["ENERG_HI"],
+                                                  matrix.columns["N_GRP"], 
+                                                  fchan_new, nchan_new, 
+                                                  m_new])
+
+    matrix_new.update_ext_name("SPECRESP MATRIX")
+
+    new_f.pop(idx)
+
+    new_f.append(matrix_new)
+
+    header_keys = ["HDUCLASS", "HDUCLAS1", "HDUVERS1", "HDUCLAS2", "HDUVERS2", "HDUCLAS3",
+                   "TELESCOP", "INSTRUME", "DETNAM", "FILTER", "DETCHANS", "CHANTYPE",
+                   "HIERARCH LO_THRESH", "LO_THRES", "RMFVERSN", "TLMIN4", "TLMAX4"]
+
+    for key in header_keys:
+        matrix_new.header[key] = matrix.header[key]
+
+    new_f.writeto(os.path.split(rmffile)[-1], clobber=True)
+
+def bin_profile(x, y, x0, y0, rmin, rmax, nbins):
+    r = np.sqrt((x-x0)**2+(y-y0)**2)
+    rbin = np.linspace(rmin, rmax, nbins+1)
+    S, _ = np.histogram(r, bins=rbin)
+    return rbin, S

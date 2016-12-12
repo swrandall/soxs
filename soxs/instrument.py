@@ -1,11 +1,9 @@
-from __future__ import print_function
-
-import json
 import numpy as np
 import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 import astropy.units as u
 import os
+from collections import defaultdict
 
 from astropy.utils.console import ProgressBar
 from soxs.constants import erg_per_keV
@@ -13,6 +11,7 @@ from soxs.simput import read_simput_catalog
 from soxs.utils import mylog, check_file_location, \
     ensure_numpy_array, write_event_file
 from soxs.background import background_registry
+from soxs.instrument_registry import instrument_registry
 
 sigma_to_fwhm = 2.*np.sqrt(2.*np.log(2.))
 
@@ -191,114 +190,12 @@ class RedistributionMatrixFile(object):
 
         return events
 
-# The Instrument Registry
+default_f = {"acisi": 10.0, 
+             "mucal": 10.0,
+             "athena_wfi": 12.0,
+             "athena_xifu": 12.0}
 
-instrument_registry = {}
-
-# Micro-calorimeter
-instrument_registry["mucal"] = {"name": "mucal_3x10",
-                                "arf": "xrs_mucal_3x10.arf",
-                                "rmf": "xrs_mucal.rmf",
-                                "bkgnd": "mucal",
-                                "fov": 5.0,
-                                "num_pixels": 300,
-                                "focal_length": 10.0,
-                                "psf": ["gaussian", 0.5]}
-instrument_registry["mucal_3x10"] = instrument_registry["mucal"]
-# The next line is for backwards-compatibility
-instrument_registry["xcal"] = instrument_registry["mucal"]
-
-# High-Definition X-ray Imager
-instrument_registry["hdxi"] = {"name": "hdxi_3x10",
-                               "arf": "xrs_hdxi_3x10.arf",
-                               "rmf": "xrs_hdxi.rmf",
-                               "bkgnd": "acisi",
-                               "fov": 20.0,
-                               "num_pixels": 4096,
-                               "focal_length": 10.0,
-                               "psf": ["gaussian", 0.5]}
-instrument_registry["hdxi_3x10"] = instrument_registry["hdxi"]
-
-# Account for different ARFs
-for det in ["hdxi", "mucal"]:
-    for mirror in ["3x15", "3x20", "6x20"]:
-        instrument_registry["%s_%s" % (det, mirror)] = instrument_registry[det].copy()
-        instrument_registry["%s_%s" % (det, mirror)]["name"] = "%s_%s" % (det, mirror)
-        instrument_registry["%s_%s" % (det, mirror)]["arf"] = "xrs_%s_%s.arf" % (det, mirror)
-        instrument_registry["%s_%s" % (det, mirror)]["focal_length"] = float(mirror.split("x")[-1])
-
-def add_instrument_to_registry(inst_spec):
-    """
-    Add an instrument specification to the registry, contained
-    in either a dictionary or a JSON file.
-
-    The *inst_spec* must have the structure as shown below. 
-    The order is not important. If you use a JSON file, the
-    structure is the same, but the file cannot include comments.
-
-    >>> {
-    ...     "name": "hdxi_3x10", # The short name of the instrument
-    ...     "arf": "xrs_hdxi_3x10.arf", # The file containing the ARF
-    ...     "rmf": "xrs_hdxi.rmf" # The file containing the RMF
-    ...     "bkgnd": "acisi" # The name of the particle background
-    ...     "fov": 20.0, # The field of view in arcminutes
-    ...     "focal_length": 10.0, # The focal length in meters
-    ...     "num_pixels": 4096, # The number of pixels on a side in the FOV
-    ...     "psf": ["gaussian", 0.5] # The type of PSF and its FWHM
-    ... }
-    """
-    if isinstance(inst_spec, dict):
-        inst = inst_spec
-    elif os.path.exists(inst_spec):
-        f = open(inst_spec, "r")
-        inst = json.load(f)
-        f.close()
-    name = inst["name"]
-    if name in instrument_registry:
-        raise KeyError("The instrument with name %s is already in the registry! Assign a different name!" % name)
-    # Catch old JSON files with plate scale
-    if "plate_scale" in inst:
-        inst["fov"] = inst["num_pixels"]*inst["plate_scale"]/60.0
-        inst.pop("plate_scale")
-    instrument_registry[name] = inst
-    mylog.info("The %s instrument specification has been added to the instrument registry." % name)
-    return name
-
-def get_instrument_from_registry(name):
-    """
-    Returns a copy of the instrument specification
-    corresponding to *name*.
-    """
-    return instrument_registry[name].copy()
-
-def show_instrument_registry():
-    """
-    Print the contents of the instrument registry.
-    """
-    for name, spec in instrument_registry.items():
-        print("Instrument: %s" % name)
-        for k, v in spec.items():
-            print("    %s: %s" % (k, v))
-
-def write_instrument_json(inst_name, filename):
-    """
-    Write an instrument specification to a JSON file.
-    Useful if one would like to create a new specification
-    by editing an existing one. 
-
-    Parameters
-    ----------
-    inst_name : string
-        The instrument specification to write.
-    filename : string
-        The filename to write to. 
-    """
-    inst_dict = instrument_registry[inst_name]
-    fp = open(filename, 'w')
-    json.dump(inst_dict, fp, indent=4)
-    fp.close()
-
-def add_background(bkgnd_name, event_params, rot_mat, bkgnd_scale, focal_length=None,
+def add_background(bkgnd_name, event_params, rot_mat, focal_length=None,
                    prng=np.random):
 
     fov = event_params["fov"]
@@ -315,10 +212,10 @@ def add_background(bkgnd_name, event_params, rot_mat, bkgnd_scale, focal_length=
         arf = AuxiliaryResponseFile(check_file_location(event_params["arf"], "files"))
         area = arf.interpolate_area(bkgnd_spec.emid).value
     else:
-        area = (focal_length/10.0)**2
+        area = (focal_length/default_f[bkgnd_name])**2
 
     bkg_events["energy"] = bkgnd_spec.generate_energies(event_params["exposure_time"],
-                                                        area, fov, bkgnd_scale, prng=prng)
+                                                        area, fov, prng=prng)
 
     n_events = bkg_events["energy"].size
 
@@ -338,8 +235,8 @@ def add_background(bkgnd_name, event_params, rot_mat, bkgnd_scale, focal_length=
 
 def instrument_simulator(simput_file, out_file, exp_time, instrument,
                          sky_center, clobber=False, dither_shape="square",
-                         dither_size=16.0, roll_angle=0.0, astro_bkgnd="hm_cxb",
-                         instr_bkgnd_scale=1.0, prng=np.random):
+                         dither_size=16.0, roll_angle=0.0, astro_bkgnd=True,
+                         instr_bkgnd=True, prng=np.random):
     """
     Take unconvolved events in a SIMPUT catalog and create an event
     file from them. This function does the following:
@@ -353,7 +250,8 @@ def instrument_simulator(simput_file, out_file, exp_time, instrument,
     Parameters
     ----------
     simput_file : string
-        The SIMPUT catalog file to be used as input.
+        The SIMPUT catalog file to be used as input. Set to None if you
+        want to simulate backgrounds/foregrounds only.
     out_file : string
         The name of the event file to be written.
     exp_time : float
@@ -376,12 +274,10 @@ def instrument_simulator(simput_file, out_file, exp_time, instrument,
         of circle. Default: 16.0
     roll_angle : float
         The roll angle of the observation in degrees. Default: 0.0
-    astro_bkgnd : string
-        The astrophysical background spectrum to assume. Must be the name of a
-        background registered in the background registry. If None, no astrophysical
-        background is applied. Default: "hm_cxb"
-    instr_bkgnd_scale : float, optional
-        The scale of the instrumental background. Default: 1.0
+    astro_bkgnd : boolean, optional
+        Whether or not to include astrophysical background. Default: True
+    instr_bkgnd : boolean, optional
+        Whether or not to include instrumental/particle background. Default: True
     prng : :class:`~numpy.random.RandomState` object or :mod:`~numpy.random`, optional
         A pseudo-random number generator. Typically will only be specified
         if you have a reason to generate the same set of random numbers, such as for a
@@ -392,7 +288,14 @@ def instrument_simulator(simput_file, out_file, exp_time, instrument,
     >>> instrument_simulator("sloshing_simput.fits", "sloshing_evt.fits", "hdxi_3x10",
     ...                      [30., 45.], clobber=True)
     """
-    event_list, parameters = read_simput_catalog(simput_file)
+    if simput_file is None:
+        if not astro_bkgnd and not instr_bkgnd:
+            raise RuntimeError("No backgrounds and no sources, so I can't do anything!!")
+        # only doing backgrounds
+        event_list = []
+        parameters = {}
+    else:
+        event_list, parameters = read_simput_catalog(simput_file)
 
     try:
         instrument_spec = instrument_registry[instrument]
@@ -442,9 +345,7 @@ def instrument_simulator(simput_file, out_file, exp_time, instrument,
     rot_mat = np.array([[np.sin(roll_angle), -np.cos(roll_angle)],
                         [-np.cos(roll_angle), -np.sin(roll_angle)]])
 
-    all_events = {}
-
-    first = True
+    all_events = defaultdict(list)
 
     for i, evts in enumerate(event_list):
 
@@ -454,8 +355,7 @@ def instrument_simulator(simput_file, out_file, exp_time, instrument,
 
         mylog.info("Applying energy-dependent effective area from %s." % event_params["arf"])
         refband = [parameters["emin"][i], parameters["emax"][i]]
-        events = arf.detect_events(evts, exp_time, parameters["flux"][i],
-                                   refband, prng=prng)
+        events = arf.detect_events(evts, exp_time, parameters["flux"][i], refband, prng=prng)
 
         n_evt = events["energy"].size
 
@@ -483,14 +383,16 @@ def instrument_simulator(simput_file, out_file, exp_time, instrument,
 
             x_offset = np.zeros(n_evt)
             y_offset = np.zeros(n_evt)
-            if dither_shape == "circle":
-                r = dsize*np.sqrt(prng.uniform(size=n_evt))
-                theta = 2.*np.pi*prng.uniform(size=n_evt)
-                x_offset = r*np.cos(theta)
-                y_offset = r*np.sin(theta)
-            elif dither_shape == "square":
-                x_offset = dsize*prng.uniform(low=-0.5, high=0.5, size=n_evt)
-                y_offset = dsize*prng.uniform(low=-0.5, high=0.5, size=n_evt)
+
+            if instrument_spec["dither"]:
+                if dither_shape == "circle":
+                    r = dsize*np.sqrt(prng.uniform(size=n_evt))
+                    theta = 2.*np.pi*prng.uniform(size=n_evt)
+                    x_offset = r*np.cos(theta)
+                    y_offset = r*np.sin(theta)
+                elif dither_shape == "square":
+                    x_offset = dsize*prng.uniform(low=-0.5, high=0.5, size=n_evt)
+                    y_offset = dsize*prng.uniform(low=-0.5, high=0.5, size=n_evt)
 
             xpix -= x_offset
             ypix -= y_offset
@@ -548,37 +450,27 @@ def instrument_simulator(simput_file, out_file, exp_time, instrument,
 
         if n_evt > 0:
             for key in events:
-                if first:
-                    all_events[key] = events[key]
-                else:
-                    all_events[key] = np.concatenate([all_events[key], events[key]])
-            first = False
+                all_events[key] = np.concatenate([all_events[key], events[key]])
 
-    if all_events["energy"].size == 0:
-        mylog.warning("No events from any of the sources in the catalog were detected!")
+    if simput_file is not None:
+        if all_events["energy"].size == 0:
+            mylog.warning("No events from any of the sources in the catalog were detected!")
 
     # Step 3: Add astrophysical background
 
-    if astro_bkgnd is not None:
-
+    if astro_bkgnd:
         mylog.info("Adding in astrophysical background.")
-
-        bkg_events = add_background(astro_bkgnd, event_params, rot_mat, 1.0, prng=prng)
-
-        for key in all_events:
+        bkg_events = add_background("hm_cxb", event_params, rot_mat, prng=prng)
+        for key in bkg_events:
             all_events[key] = np.concatenate([all_events[key], bkg_events[key]])
 
     # Step 4: Add particle background
 
-    if instr_bkgnd_scale > 0.0:
-
+    if instr_bkgnd:
         mylog.info("Adding in instrumental background.")
-
         bkg_events = add_background(instrument_spec["bkgnd"], event_params, rot_mat,
-                                    instr_bkgnd_scale, prng=prng,
-                                    focal_length=instrument_spec["focal_length"])
-
-        for key in all_events:
+                                    prng=prng, focal_length=instrument_spec["focal_length"])
+        for key in bkg_events:
             all_events[key] = np.concatenate([all_events[key], bkg_events[key]])
 
     if all_events["energy"].size == 0:
